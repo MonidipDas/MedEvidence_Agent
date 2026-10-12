@@ -6,3 +6,5 @@ sentence-transformers>=3.0.0
 plotly>=5.18.0
 pandas>=2.1.0
 torch>=2.1.0
+numpy>=1.26.0
+mcp>=1.0.0

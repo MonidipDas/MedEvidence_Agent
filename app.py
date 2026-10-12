@@ -1,683 +1,492 @@
 """
-Self-Correcting Medical Evidence Agent – Streamlit UI
-=====================================================
-A biomedical RAG agent that retrieves evidence from PubMed, generates
-evidence-based answers, verifies claims via DeBERTa NLI, and self-corrects
-unsupported claims. Abstains when evidence is insufficient.
-
-Stack: BioASQ-style RAG · DeBERTa NLI · SarvamAI SLM · LangGraph
+MedEvidence Agent – Streamlit UI (v2 · clean redesign)
+=======================================================
+Self-correcting biomedical evidence agent with NLI claim verification.
 """
 import streamlit as st
 import time
-import json
-import pandas as pd
 import plotly.graph_objects as go
-import plotly.express as px
 from agent import run_agent
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Page config & theme
-# ═══════════════════════════════════════════════════════════════════════════
+# ── Page config ────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="MedEvidence Agent · Self-Correcting Biomedical AI",
+    page_title="MedEvidence Agent",
     page_icon="🧬",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Custom CSS
-# ═══════════════════════════════════════════════════════════════════════════
+# ── Minimal clean CSS ───────────────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
-/* ── Global ── */
-* { font-family: 'Inter', sans-serif; }
-.stApp {
-    background: linear-gradient(135deg, #0a0e1a 0%, #111827 40%, #0f172a 100%);
-}
+html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 
-/* ── Header area ── */
-.hero-container {
-    background: linear-gradient(135deg, rgba(16,185,129,0.08) 0%, rgba(59,130,246,0.08) 50%, rgba(139,92,246,0.08) 100%);
-    border: 1px solid rgba(16,185,129,0.15);
-    border-radius: 20px;
-    padding: 2rem 2.5rem;
-    margin-bottom: 1.5rem;
-    backdrop-filter: blur(20px);
+/* ── Layout ── */
+.block-container { padding-top: 1.5rem; padding-bottom: 2rem; max-width: 1200px; }
+
+/* ── Header ── */
+.header { margin-bottom: 1.5rem; }
+.header h1 {
+    font-size: 1.8rem; font-weight: 700; color: #f1f5f9;
+    margin: 0 0 0.3rem 0; letter-spacing: -0.3px;
 }
-.hero-title {
-    font-size: 2.2rem;
-    font-weight: 800;
-    background: linear-gradient(135deg, #10b981, #3b82f6, #8b5cf6);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    margin-bottom: 0.3rem;
-    letter-spacing: -0.5px;
+.header p { color: #64748b; font-size: 0.88rem; margin: 0; }
+.badge {
+    display: inline-block; font-size: 0.7rem; font-weight: 600;
+    padding: 2px 10px; border-radius: 999px; margin-right: 6px; margin-top: 8px;
+    letter-spacing: 0.3px;
 }
-.hero-subtitle {
-    color: #94a3b8;
-    font-size: 1rem;
-    font-weight: 400;
-    line-height: 1.6;
+.badge-green  { background: #052e16; color: #34d399; border: 1px solid #065f46; }
+.badge-blue   { background: #0c1a3a; color: #60a5fa; border: 1px solid #1e3a8a; }
+.badge-purple { background: #1e0a40; color: #c084fc; border: 1px solid #4c1d95; }
+.badge-gray   { background: #1e293b; color: #94a3b8; border: 1px solid #334155; }
+
+/* ── Metric strip ── */
+.metric-strip {
+    display: flex; gap: 12px; margin: 1rem 0;
 }
-.hero-badge {
-    display: inline-block;
-    background: rgba(16,185,129,0.15);
-    color: #10b981;
-    padding: 4px 12px;
-    border-radius: 20px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    margin-right: 8px;
-    margin-top: 10px;
-    border: 1px solid rgba(16,185,129,0.25);
+.metric-box {
+    flex: 1; background: #1e293b; border: 1px solid #334155;
+    border-radius: 10px; padding: 14px 16px; text-align: center;
 }
-.hero-badge-blue {
-    background: rgba(59,130,246,0.15);
-    color: #3b82f6;
-    border-color: rgba(59,130,246,0.25);
-}
-.hero-badge-purple {
-    background: rgba(139,92,246,0.15);
-    color: #8b5cf6;
-    border-color: rgba(139,92,246,0.25);
-}
+.metric-box .val { font-size: 1.7rem; font-weight: 700; margin-bottom: 2px; }
+.metric-box .lbl { font-size: 0.72rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
 
 /* ── Cards ── */
-.glass-card {
-    background: rgba(30,41,59,0.6);
-    border: 1px solid rgba(148,163,184,0.1);
-    border-radius: 16px;
-    padding: 1.5rem;
-    margin-bottom: 1rem;
-    backdrop-filter: blur(16px);
-    transition: all 0.3s ease;
+.card {
+    background: #1e293b; border: 1px solid #334155;
+    border-radius: 12px; padding: 1rem 1.2rem; margin-bottom: 0.75rem;
 }
-.glass-card:hover {
-    border-color: rgba(16,185,129,0.3);
-    box-shadow: 0 8px 32px rgba(16,185,129,0.08);
-}
-.card-title {
-    color: #e2e8f0;
-    font-size: 1.1rem;
-    font-weight: 700;
-    margin-bottom: 0.8rem;
-    display: flex;
-    align-items: center;
-    gap: 8px;
+.card-header {
+    font-size: 0.8rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.5px; color: #94a3b8; margin-bottom: 0.75rem;
 }
 
-/* ── Passage cards ── */
-.passage-card {
-    background: rgba(15,23,42,0.7);
-    border: 1px solid rgba(59,130,246,0.15);
-    border-radius: 12px;
-    padding: 1.2rem;
-    margin-bottom: 0.8rem;
-    border-left: 3px solid #3b82f6;
-    transition: all 0.2s ease;
+/* ── Evidence passage ── */
+.passage {
+    border-left: 3px solid #3b82f6; padding: 0.7rem 1rem;
+    background: #0f172a; border-radius: 0 8px 8px 0;
+    margin-bottom: 0.6rem;
 }
-.passage-card:hover {
-    border-left-color: #10b981;
-    background: rgba(15,23,42,0.9);
-}
-.passage-source {
-    color: #64748b;
-    font-size: 0.78rem;
-    font-weight: 500;
-    margin-top: 8px;
-}
-.passage-title {
-    color: #93c5fd;
-    font-weight: 600;
-    font-size: 0.9rem;
-    margin-bottom: 6px;
-}
-.passage-text {
-    color: #cbd5e1;
-    font-size: 0.83rem;
-    line-height: 1.65;
-}
+.passage-title { color: #93c5fd; font-size: 0.85rem; font-weight: 600; margin-bottom: 4px; }
+.passage-body  { color: #cbd5e1; font-size: 0.8rem; line-height: 1.6; }
+.passage-meta  { color: #475569; font-size: 0.72rem; margin-top: 6px; }
 
-/* ── Verdict badges ── */
-.verdict-supported {
-    background: rgba(16,185,129,0.12);
-    border: 1px solid rgba(16,185,129,0.3);
-    color: #34d399;
-    border-radius: 12px;
-    padding: 1rem 1.2rem;
-    margin-bottom: 0.6rem;
+/* ── Verdict chips ── */
+.verdict {
+    border-radius: 8px; padding: 0.65rem 0.9rem;
+    margin-bottom: 0.5rem; border-left: 3px solid;
 }
-.verdict-contradicted {
-    background: rgba(239,68,68,0.12);
-    border: 1px solid rgba(239,68,68,0.3);
-    color: #fca5a5;
-    border-radius: 12px;
-    padding: 1rem 1.2rem;
-    margin-bottom: 0.6rem;
-}
-.verdict-unsupported {
-    background: rgba(245,158,11,0.12);
-    border: 1px solid rgba(245,158,11,0.3);
-    color: #fbbf24;
-    border-radius: 12px;
-    padding: 1rem 1.2rem;
-    margin-bottom: 0.6rem;
-}
-.verdict-neutral {
-    background: rgba(139,92,246,0.12);
-    border: 1px solid rgba(139,92,246,0.3);
-    color: #c4b5fd;
-    border-radius: 12px;
-    padding: 1rem 1.2rem;
-    margin-bottom: 0.6rem;
-}
-.verdict-label {
-    font-weight: 700;
-    font-size: 0.8rem;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 4px;
-}
-.verdict-claim {
-    font-size: 0.88rem;
-    line-height: 1.5;
-}
-.verdict-meta {
-    font-size: 0.75rem;
-    opacity: 0.7;
-    margin-top: 4px;
-}
+.verdict .v-label { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+.verdict .v-claim { font-size: 0.83rem; margin-top: 3px; line-height: 1.5; }
+.verdict .v-meta  { font-size: 0.72rem; margin-top: 4px; opacity: 0.65; }
 
-/* ── Metric cards ── */
-.metric-card {
-    background: rgba(30,41,59,0.5);
-    border: 1px solid rgba(148,163,184,0.1);
-    border-radius: 14px;
-    padding: 1.2rem;
-    text-align: center;
-}
-.metric-value {
-    font-size: 2rem;
-    font-weight: 800;
-    margin-bottom: 4px;
-}
-.metric-label {
-    color: #94a3b8;
-    font-size: 0.8rem;
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-/* ── Trace log ── */
-.trace-entry {
-    background: rgba(15,23,42,0.5);
-    border-left: 2px solid #3b82f6;
-    padding: 0.5rem 1rem;
-    margin-bottom: 4px;
-    border-radius: 0 8px 8px 0;
-    color: #cbd5e1;
-    font-size: 0.82rem;
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
-}
+.v-supported    { background: #052e16; border-color: #16a34a; color: #86efac; }
+.v-contradicted { background: #450a0a; border-color: #dc2626; color: #fca5a5; }
+.v-unsupported  { background: #1c1003; border-color: #d97706; color: #fcd34d; }
+.v-neutral      { background: #150b30; border-color: #7c3aed; color: #c4b5fd; }
 
 /* ── Answer box ── */
 .answer-box {
-    background: linear-gradient(135deg, rgba(16,185,129,0.06) 0%, rgba(59,130,246,0.06) 100%);
-    border: 1px solid rgba(16,185,129,0.2);
-    border-radius: 16px;
-    padding: 1.5rem;
-    color: #e2e8f0;
-    font-size: 0.95rem;
-    line-height: 1.8;
+    background: #0f172a; border: 1px solid #1e3a5f;
+    border-radius: 10px; padding: 1.2rem 1.4rem;
+    color: #e2e8f0; font-size: 0.88rem; line-height: 1.8;
+    white-space: pre-wrap;
 }
 
-/* ── Sidebar styling ── */
-[data-testid="stSidebar"] {
-    background: rgba(15,23,42,0.95) !important;
-    border-right: 1px solid rgba(148,163,184,0.08);
-}
-[data-testid="stSidebar"] .stMarkdown p {
-    color: #94a3b8;
-}
-
-/* ── Input field ── */
-.stTextInput > div > div > input,
-.stTextArea > div > div > textarea {
-    background: rgba(30,41,59,0.8) !important;
-    border: 1px solid rgba(148,163,184,0.15) !important;
-    border-radius: 12px !important;
-    color: #e2e8f0 !important;
-    font-family: 'Inter', sans-serif !important;
-}
-.stTextInput > div > div > input:focus,
-.stTextArea > div > div > textarea:focus {
-    border-color: rgba(16,185,129,0.5) !important;
-    box-shadow: 0 0 0 2px rgba(16,185,129,0.15) !important;
+/* ── Trace log ── */
+.trace-line {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.77rem; color: #94a3b8;
+    border-left: 2px solid #334155; padding: 3px 10px;
+    margin-bottom: 3px; background: #0f172a; border-radius: 0 4px 4px 0;
 }
 
-/* ── Buttons ── */
-.stButton > button {
-    background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
-    color: white !important;
-    border: none !important;
-    border-radius: 12px !important;
-    padding: 0.6rem 2rem !important;
-    font-weight: 600 !important;
-    font-size: 0.95rem !important;
-    transition: all 0.3s ease !important;
-    box-shadow: 0 4px 15px rgba(16,185,129,0.3) !important;
+/* ── Safety pill ── */
+.safety-pill {
+    display: inline-block; font-size: 0.78rem; font-weight: 600;
+    padding: 4px 14px; border-radius: 999px; margin-top: 10px;
 }
-.stButton > button:hover {
-    transform: translateY(-2px) !important;
-    box-shadow: 0 8px 25px rgba(16,185,129,0.4) !important;
+.safety-high   { background: #052e16; color: #34d399; border: 1px solid #065f46; }
+.safety-mid    { background: #1c1003; color: #fcd34d; border: 1px solid #92400e; }
+.safety-low    { background: #450a0a; color: #fca5a5; border: 1px solid #7f1d1d; }
+.safety-abs    { background: #1e0a40; color: #c084fc; border: 1px solid #4c1d95; }
+
+/* ── Sidebar ── */
+[data-testid="stSidebar"] { background: #0f172a !important; border-right: 1px solid #1e293b; }
+[data-testid="stSidebar"] .stButton > button {
+    background: #1e293b !important; color: #e2e8f0 !important;
+    border: 1px solid #334155 !important; border-radius: 8px !important;
+    font-size: 0.78rem !important; text-align: left !important;
+    padding: 0.4rem 0.8rem !important; margin-bottom: 2px !important;
+    box-shadow: none !important;
 }
+[data-testid="stSidebar"] .stButton > button:hover {
+    border-color: #3b82f6 !important; color: #93c5fd !important;
+    transform: none !important;
+}
+
+/* ── Main CTA button ── */
+div[data-testid="stHorizontalBlock"] .stButton > button {
+    background: linear-gradient(135deg, #1d4ed8 0%, #4338ca 100%) !important;
+    color: white !important; border: none !important;
+    border-radius: 8px !important; font-weight: 600 !important;
+    font-size: 0.88rem !important; padding: 0.55rem 1.6rem !important;
+    box-shadow: 0 2px 8px rgba(59,130,246,0.35) !important;
+    transition: opacity 0.2s !important;
+}
+div[data-testid="stHorizontalBlock"] .stButton > button:hover {
+    opacity: 0.88 !important; transform: none !important; box-shadow: none !important;
+}
+
+/* ── Input ── */
+.stTextInput > div > div > input {
+    background: #1e293b !important; border: 1px solid #334155 !important;
+    border-radius: 8px !important; color: #e2e8f0 !important;
+    font-size: 0.88rem !important;
+}
+.stTextInput > div > div > input:focus {
+    border-color: #3b82f6 !important;
+    box-shadow: 0 0 0 2px rgba(59,130,246,0.2) !important;
+}
+.stTextInput label { color: #64748b !important; font-size: 0.8rem !important; }
+
+/* ── Tabs ── */
+.stTabs [data-baseweb="tab-list"] {
+    background: #0f172a !important; border-bottom: 1px solid #334155 !important; gap: 0;
+}
+.stTabs [data-baseweb="tab"] {
+    color: #64748b !important; font-size: 0.82rem !important; font-weight: 500 !important;
+    padding: 0.5rem 1.2rem !important; border-radius: 0 !important;
+    border-bottom: 2px solid transparent !important;
+}
+.stTabs [aria-selected="true"] {
+    color: #60a5fa !important; border-bottom-color: #3b82f6 !important;
+    background: transparent !important;
+}
+.stTabs [data-baseweb="tab-panel"] { padding-top: 1rem; }
 
 /* ── Expander ── */
-.streamlit-expanderHeader {
-    background: rgba(30,41,59,0.5) !important;
-    border-radius: 10px !important;
-    color: #e2e8f0 !important;
-}
+.streamlit-expanderHeader { background: #1e293b !important; border-radius: 8px !important; }
 
 /* ── Divider ── */
-hr { border-color: rgba(148,163,184,0.1) !important; }
+hr { border-color: #1e293b !important; margin: 1rem 0 !important; }
 
 /* ── Scrollbar ── */
-::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(148,163,184,0.2); border-radius: 3px; }
+::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
 </style>
 """, unsafe_allow_html=True)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Hero Header
-# ═══════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════
+# Header
+# ══════════════════════════════════════════════════════════════════════════
 st.markdown("""
-<div class="hero-container">
-    <div class="hero-title">🧬 MedEvidence Agent</div>
-    <div class="hero-subtitle">
-        Self-correcting biomedical evidence synthesis with NLI-based claim verification.
-        Retrieves PubMed evidence, generates answers, verifies each claim via DeBERTa NLI,
-        and automatically corrects unsupported statements.
-    </div>
-    <div>
-        <span class="hero-badge">PubMed RAG</span>
-        <span class="hero-badge-blue hero-badge">DeBERTa NLI</span>
-        <span class="hero-badge-purple hero-badge">SarvamAI SLM</span>
-        <span class="hero-badge">LangGraph</span>
-    </div>
+<div class="header">
+  <h1>🧬 MedEvidence Agent</h1>
+  <p>Self-correcting biomedical evidence synthesis · NLI claim verification · Appropriate abstention</p>
+  <div>
+    <span class="badge badge-green">PubMed RAG</span>
+    <span class="badge badge-blue">DeBERTa NLI</span>
+    <span class="badge badge-purple">SarvamAI 105B</span>
+    <span class="badge badge-gray">LangGraph</span>
+    <span class="badge badge-gray">MCP</span>
+  </div>
 </div>
 """, unsafe_allow_html=True)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════
 # Sidebar
-# ═══════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════
 with st.sidebar:
-    st.markdown("### ⚙️ Agent Configuration")
-    st.markdown("---")
+    st.markdown("#### 🔬 Example Questions")
 
-    st.markdown("**Research Metrics**")
-    st.markdown("""
-    This agent measures three key dimensions:
-    - 🎯 **Faithfulness** – % of claims supported by evidence
-    - 🛡️ **Unsafe Claims** – contradicted or unverifiable assertions
-    - 🚫 **Abstention** – refusal when evidence is insufficient
-    """)
-
-    st.markdown("---")
-    st.markdown("**How It Works**")
-    st.markdown("""
-    ```
-    1. 📚 Retrieve evidence (PubMed)
-    2. 🤖 Generate answer (SarvamAI)
-    3. 🔍 Extract atomic claims
-    4. 🧪 Verify via NLI (DeBERTa)
-    5. 🔄 Self-correct if needed
-    6. 📋 Output with safety score
-    ```
-    """)
-
-    st.markdown("---")
-    st.markdown("**Graph Architecture**")
-    st.markdown("""
-    ```
-    START → retrieve → abstain?
-      ↓ no                ↓ yes
-    generate → claims → NLI
-      ↓                   ↓
-    [faithful?]      → correct ↩
-      ↓ yes
-    output → END
-    ```
-    """)
-
-    st.markdown("---")
-    st.markdown("**Example Questions**")
-    example_questions = [
+    examples = [
         "What is the efficacy of metformin for type 2 diabetes?",
         "Does aspirin prevent cardiovascular events?",
         "What are the side effects of statins?",
-        "Is CRISPR effective for sickle cell disease treatment?",
+        "Is CRISPR effective for sickle cell disease?",
         "What is the role of gut microbiome in depression?",
+        "How effective is immunotherapy for lung cancer?",
     ]
-    for q in example_questions:
+    for q in examples:
         if st.button(q, key=f"ex_{hash(q)}", use_container_width=True):
-            st.session_state["query_input"] = q
+            st.session_state["query"] = q
 
     st.markdown("---")
-    st.markdown(
-        "<div style='color:#64748b;font-size:0.75rem;text-align:center'>"
-        "Built with LangGraph · DeBERTa · SarvamAI<br>"
-        "⚠️ For research purposes only – not for clinical decisions"
-        "</div>",
-        unsafe_allow_html=True,
-    )
+    st.markdown("#### ⚙️ Pipeline")
+    st.markdown("""
+```
+1  Retrieve (PubMed)
+2  Generate answer (SarvamAI)
+3  Extract claims
+4  Verify via NLI (DeBERTa)
+5  Self-correct if needed
+6  Abstain if insufficient
+```
+""")
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Main Input
-# ═══════════════════════════════════════════════════════════════════════════
-col_input, col_btn = st.columns([5, 1])
-with col_input:
+    st.markdown("---")
+    st.markdown("#### 🔌 MCP Server")
+    st.markdown("""
+    Run `python mcp_server.py` to expose agent tools via **Model Context Protocol**:
+    - `retrieve_evidence`
+    - `verify_claim`
+    - `run_medical_agent`
+    """)
+
+    st.markdown("---")
+    st.caption("⚠️ Research prototype — not for clinical decisions.")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Input row
+# ══════════════════════════════════════════════════════════════════════════
+col_q, col_btn = st.columns([5, 1])
+with col_q:
     query = st.text_input(
-        "Ask a biomedical question",
-        placeholder="e.g., What is the efficacy of metformin for type 2 diabetes?",
-        key="query_input",
-        label_visibility="collapsed",
+        "Biomedical question",
+        value=st.session_state.get("query", ""),
+        placeholder="e.g. What is the efficacy of metformin for type 2 diabetes?",
+        key="query",
     )
 with col_btn:
-    run_clicked = st.button("🔬 Analyze", use_container_width=True)
+    st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+    run = st.button("Analyze →", use_container_width=True)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Agent execution & results
-# ═══════════════════════════════════════════════════════════════════════════
-if run_clicked and query:
-    # ── Progress tracking ──
-    progress_container = st.empty()
-    with progress_container.container():
-        st.markdown("""
-        <div class="glass-card" style="text-align:center;padding:2rem">
-            <div style="font-size:2.5rem;margin-bottom:0.5rem">🧬</div>
-            <div style="color:#e2e8f0;font-size:1.1rem;font-weight:600">Processing your query...</div>
-            <div style="color:#94a3b8;font-size:0.85rem;margin-top:0.5rem">
-                Retrieving evidence → Generating answer → Verifying claims → Self-correcting
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+# ══════════════════════════════════════════════════════════════════════════
+# Run agent
+# ══════════════════════════════════════════════════════════════════════════
+if run and query:
+    with st.spinner("Retrieving evidence, generating answer, verifying claims…"):
+        t0 = time.time()
+        try:
+            result = run_agent(query)
+            elapsed = time.time() - t0
+        except Exception as e:
+            st.error(f"**Agent Error**: {e}")
+            import traceback
+            with st.expander("Stack trace"):
+                st.code(traceback.format_exc())
+            st.stop()
 
-    start_time = time.time()
+    # ── pull fields ───────────────────────────────────────────────────────
+    abstained       = result.get("abstained", False)
+    faithfulness    = result.get("faithfulness_score", 0.0)
+    passages        = result.get("passages", [])
+    claims          = result.get("claims", [])
+    verdicts        = result.get("verdicts", [])
+    supported       = result.get("supported_claims", [])
+    unsupported     = result.get("unsupported_claims", [])
+    correction_rnd  = result.get("correction_round", 0)
+    final_answer    = result.get("final_answer", "")
+    trace           = result.get("trace_log", [])
 
-    try:
-        result = run_agent(query)
-        elapsed = time.time() - start_time
-        progress_container.empty()
+    # ── metric strip ──────────────────────────────────────────────────────
+    faith_color = "#34d399" if faithfulness >= 0.8 else "#fbbf24" if faithfulness >= 0.5 else "#f87171"
+    abs_color   = "#f87171" if abstained else "#34d399"
 
-        # ── Metrics Row ──
-        st.markdown("### 📊 Analysis Results")
-        m1, m2, m3, m4, m5 = st.columns(5)
+    st.markdown(f"""
+    <div class="metric-strip">
+      <div class="metric-box">
+        <div class="val" style="color:{faith_color}">{faithfulness:.0%}</div>
+        <div class="lbl">Faithfulness</div>
+      </div>
+      <div class="metric-box">
+        <div class="val" style="color:#60a5fa">{len(passages)}</div>
+        <div class="lbl">Sources</div>
+      </div>
+      <div class="metric-box">
+        <div class="val" style="color:#34d399">{len(supported)}</div>
+        <div class="lbl">Supported</div>
+      </div>
+      <div class="metric-box">
+        <div class="val" style="color:#f87171">{len(unsupported)}</div>
+        <div class="lbl">Unsafe Claims</div>
+      </div>
+      <div class="metric-box">
+        <div class="val" style="color:#c084fc">{correction_rnd}</div>
+        <div class="lbl">Corrections</div>
+      </div>
+      <div class="metric-box">
+        <div class="val" style="color:{abs_color}">{"YES" if abstained else "NO"}</div>
+        <div class="lbl">Abstained</div>
+      </div>
+    </div>
+    <div style="color:#475569;font-size:0.75rem;margin-bottom:1rem">
+      ⏱ {elapsed:.1f}s
+    </div>
+    """, unsafe_allow_html=True)
 
-        faithfulness = result.get("faithfulness_score", 0.0)
-        num_passages = len(result.get("passages", []))
-        num_claims = len(result.get("claims", []))
-        num_supported = len(result.get("supported_claims", []))
-        num_unsupported = len(result.get("unsupported_claims", []))
-        correction_rounds = result.get("correction_round", 0)
-        abstained = result.get("abstained", False)
+    st.markdown("---")
 
-        faith_color = "#10b981" if faithfulness >= 0.8 else "#f59e0b" if faithfulness >= 0.5 else "#ef4444"
+    # ── tabs ──────────────────────────────────────────────────────────────
+    tab_ans, tab_nli, tab_src, tab_trace = st.tabs([
+        "📋 Answer", "🧪 NLI Verification", "📚 Evidence Sources", "🔍 Trace"
+    ])
 
-        with m1:
-            st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-value" style="color:{faith_color}">{faithfulness:.0%}</div>
-                <div class="metric-label">Faithfulness</div>
-            </div>
-            """, unsafe_allow_html=True)
-        with m2:
-            st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-value" style="color:#3b82f6">{num_passages}</div>
-                <div class="metric-label">Evidence Sources</div>
-            </div>
-            """, unsafe_allow_html=True)
-        with m3:
-            st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-value" style="color:#10b981">{num_supported}</div>
-                <div class="metric-label">Supported Claims</div>
-            </div>
-            """, unsafe_allow_html=True)
-        with m4:
-            st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-value" style="color:#ef4444">{num_unsupported}</div>
-                <div class="metric-label">Unsafe Claims</div>
-            </div>
-            """, unsafe_allow_html=True)
-        with m5:
-            abstain_text = "YES" if abstained else "NO"
-            abstain_color = "#ef4444" if abstained else "#10b981"
-            st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-value" style="color:{abstain_color}">{abstain_text}</div>
-                <div class="metric-label">Abstained</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        st.markdown(f"<div style='text-align:center;color:#64748b;font-size:0.8rem;margin-top:0.5rem'>"
-                     f"⏱️ Completed in {elapsed:.1f}s · 🔄 {correction_rounds} correction round(s)</div>",
-                     unsafe_allow_html=True)
-
-        st.markdown("---")
-
-        # ── Final Answer ──
-        col_answer, col_analysis = st.columns([3, 2])
-
-        with col_answer:
-            st.markdown('<div class="card-title">📋 Final Answer</div>', unsafe_allow_html=True)
-            final_answer = result.get("final_answer", "No answer generated.")
-            st.markdown(f'<div class="answer-box">{final_answer}</div>', unsafe_allow_html=True)
-
-            # ── Evidence Passages ──
-            st.markdown("")
-            st.markdown('<div class="card-title">📚 Evidence Passages</div>', unsafe_allow_html=True)
-            passages = result.get("passages", [])
-            if passages:
-                for i, p in enumerate(passages):
-                    abstract_preview = p.get("abstract", "")[:300]
-                    if len(p.get("abstract", "")) > 300:
-                        abstract_preview += "..."
-                    st.markdown(f"""
-                    <div class="passage-card">
-                        <div class="passage-title">{i+1}. {p.get('title', 'Untitled')}</div>
-                        <div class="passage-text">{abstract_preview}</div>
-                        <div class="passage-source">
-                            {p.get('source_label', f"PMID: {p.get('pmid', 'Unknown')}")}
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
+    # ── Tab 1: Answer ─────────────────────────────────────────────────────
+    with tab_ans:
+        if abstained:
+            st.warning(final_answer, icon="🚫")
+        else:
+            # Safety pill
+            if faithfulness >= 0.8:
+                pill_cls, pill_txt = "safety-high", "🟢 High Faithfulness"
+            elif faithfulness >= 0.5:
+                pill_cls, pill_txt = "safety-mid", "🟡 Moderate Faithfulness"
             else:
-                st.info("No evidence passages retrieved.")
+                pill_cls, pill_txt = "safety-low", "🔴 Low Faithfulness"
 
-        with col_analysis:
-            # ── NLI Verdicts ──
-            st.markdown('<div class="card-title">🧪 Claim Verification (NLI)</div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<span class="safety-pill {pill_cls}">{pill_txt} · {faithfulness:.0%} of claims supported</span>',
+                unsafe_allow_html=True,
+            )
+            st.markdown("")
 
-            verdicts = result.get("verdicts", [])
-            if verdicts:
+            # Strip the metadata footer that's embedded in final_answer for display
+            answer_body = result.get("answer", final_answer)
+            st.markdown(f'<div class="answer-box">{answer_body}</div>', unsafe_allow_html=True)
+
+    # ── Tab 2: NLI ───────────────────────────────────────────────────────
+    with tab_nli:
+        if not verdicts:
+            st.info("No claim verdicts available.")
+        else:
+            col_v, col_chart = st.columns([3, 2])
+
+            with col_v:
                 for v in verdicts:
-                    label = v.get("label", "UNKNOWN")
-                    css_class = {
-                        "SUPPORTED": "verdict-supported",
-                        "CONTRADICTED": "verdict-contradicted",
-                        "UNSUPPORTED": "verdict-unsupported",
-                        "NEUTRAL": "verdict-neutral",
-                    }.get(label, "verdict-unsupported")
-
+                    lbl = v.get("label", "UNSUPPORTED")
+                    css = {
+                        "SUPPORTED": "v-supported", "CONTRADICTED": "v-contradicted",
+                        "UNSUPPORTED": "v-unsupported", "NEUTRAL": "v-neutral",
+                    }.get(lbl, "v-unsupported")
+                    icon = v.get("icon", "")
+                    claim_txt = v.get("claim", "")
+                    ent = v.get("entailment_score", 0)
+                    con = v.get("contradiction_score", 0)
+                    expl = v.get("explanation", "")
                     st.markdown(f"""
-                    <div class="{css_class}">
-                        <div class="verdict-label">{v.get('icon','')} {label}</div>
-                        <div class="verdict-claim">{v.get('claim','')}</div>
-                        <div class="verdict-meta">
-                            Entailment: {v.get('entailment_score',0):.3f} ·
-                            Contradiction: {v.get('contradiction_score',0):.3f} ·
-                            {v.get('explanation','')}
-                        </div>
+                    <div class="verdict {css}">
+                      <div class="v-label">{icon} {lbl}</div>
+                      <div class="v-claim">{claim_txt}</div>
+                      <div class="v-meta">Entailment {ent:.3f} · Contradiction {con:.3f} · {expl}</div>
                     </div>
                     """, unsafe_allow_html=True)
 
-                # ── NLI Score Distribution Chart ──
-                st.markdown("")
-                st.markdown('<div class="card-title">📈 NLI Score Distribution</div>', unsafe_allow_html=True)
-
-                if verdicts:
-                    claims_short = [v["claim"][:40] + "..." if len(v["claim"]) > 40 else v["claim"] for v in verdicts]
-                    fig = go.Figure()
-                    fig.add_trace(go.Bar(
-                        name="Entailment", x=claims_short,
-                        y=[v["entailment_score"] for v in verdicts],
-                        marker_color="#10b981",
-                    ))
-                    fig.add_trace(go.Bar(
-                        name="Contradiction", x=claims_short,
-                        y=[v["contradiction_score"] for v in verdicts],
-                        marker_color="#ef4444",
-                    ))
-                    fig.add_trace(go.Bar(
-                        name="Neutral", x=claims_short,
-                        y=[v["neutral_score"] for v in verdicts],
-                        marker_color="#8b5cf6",
-                    ))
-                    fig.update_layout(
-                        barmode="group",
-                        plot_bgcolor="rgba(0,0,0,0)",
-                        paper_bgcolor="rgba(0,0,0,0)",
-                        font=dict(color="#94a3b8", size=10),
-                        legend=dict(orientation="h", y=-0.3),
-                        margin=dict(l=20, r=20, t=20, b=80),
-                        height=320,
-                        xaxis=dict(tickangle=-30, showgrid=False),
-                        yaxis=dict(showgrid=True, gridcolor="rgba(148,163,184,0.1)"),
-                    )
-                    # Add threshold line
-                    fig.add_hline(y=0.65, line_dash="dash", line_color="#10b981",
-                                  annotation_text="Support threshold", annotation_font_color="#10b981")
-                    st.plotly_chart(fig, use_container_width=True)
-
-                # ── Verdict Summary Donut ──
-                labels_count = {}
+            with col_chart:
+                # Donut
+                label_counts: dict[str, int] = {}
                 for v in verdicts:
                     l = v["label"]
-                    labels_count[l] = labels_count.get(l, 0) + 1
+                    label_counts[l] = label_counts.get(l, 0) + 1
 
-                if labels_count:
-                    fig_donut = go.Figure(data=[go.Pie(
-                        labels=list(labels_count.keys()),
-                        values=list(labels_count.values()),
-                        hole=0.55,
-                        marker=dict(colors=[
-                            {"SUPPORTED": "#10b981", "CONTRADICTED": "#ef4444",
-                             "UNSUPPORTED": "#f59e0b", "NEUTRAL": "#8b5cf6"}.get(l, "#64748b")
-                            for l in labels_count.keys()
-                        ]),
-                        textinfo="label+percent",
-                        textfont=dict(size=11, color="#e2e8f0"),
-                    )])
-                    fig_donut.update_layout(
-                        plot_bgcolor="rgba(0,0,0,0)",
-                        paper_bgcolor="rgba(0,0,0,0)",
-                        font=dict(color="#94a3b8"),
-                        margin=dict(l=20, r=20, t=30, b=20),
-                        height=280,
-                        showlegend=False,
-                        annotations=[dict(
-                            text=f"{faithfulness:.0%}", x=0.5, y=0.5,
-                            font_size=28, font_color=faith_color,
-                            showarrow=False, font_family="Inter",
-                        )],
+                colors = {
+                    "SUPPORTED": "#16a34a", "CONTRADICTED": "#dc2626",
+                    "UNSUPPORTED": "#d97706", "NEUTRAL": "#7c3aed",
+                }
+                fig = go.Figure(go.Pie(
+                    labels=list(label_counts.keys()),
+                    values=list(label_counts.values()),
+                    hole=0.58,
+                    marker=dict(
+                        colors=[colors.get(l, "#64748b") for l in label_counts],
+                        line=dict(color="#0f172a", width=2),
+                    ),
+                    textinfo="label+percent",
+                    textfont=dict(size=11, color="#e2e8f0"),
+                ))
+                fig.update_layout(
+                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="#94a3b8"), showlegend=False,
+                    margin=dict(l=10, r=10, t=10, b=10), height=240,
+                    annotations=[dict(
+                        text=f"<b>{faithfulness:.0%}</b>", x=0.5, y=0.5,
+                        font=dict(size=22, color=faith_color, family="Inter"),
+                        showarrow=False,
+                    )],
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+                # Bar chart
+                if len(verdicts) <= 8:
+                    short_claims = [v["claim"][:35] + "…" for v in verdicts]
+                    fig2 = go.Figure()
+                    fig2.add_trace(go.Bar(
+                        name="Entailment", x=short_claims,
+                        y=[v["entailment_score"] for v in verdicts],
+                        marker_color="#16a34a", opacity=0.85,
+                    ))
+                    fig2.add_trace(go.Bar(
+                        name="Contradiction", x=short_claims,
+                        y=[v["contradiction_score"] for v in verdicts],
+                        marker_color="#dc2626", opacity=0.85,
+                    ))
+                    fig2.update_layout(
+                        barmode="group", paper_bgcolor="rgba(0,0,0,0)",
+                        plot_bgcolor="rgba(0,0,0,0)", font=dict(color="#94a3b8", size=9),
+                        margin=dict(l=10, r=10, t=10, b=60), height=220,
+                        legend=dict(orientation="h", y=-0.4, font=dict(size=9)),
+                        xaxis=dict(tickangle=-30, showgrid=False, tickfont=dict(size=8)),
+                        yaxis=dict(showgrid=True, gridcolor="#1e293b"),
                     )
-                    st.plotly_chart(fig_donut, use_container_width=True)
+                    fig2.add_hline(y=0.65, line_dash="dot", line_color="#34d399",
+                                   annotation_text="Support threshold",
+                                   annotation_font_color="#34d399",
+                                   annotation_font_size=9)
+                    st.plotly_chart(fig2, use_container_width=True)
 
-            else:
-                if abstained:
-                    st.warning("Agent abstained – no claims to verify.")
-                else:
-                    st.info("No claim verdicts available.")
+    # ── Tab 3: Sources ────────────────────────────────────────────────────
+    with tab_src:
+        if not passages:
+            st.info("No evidence passages retrieved.")
+        else:
+            for i, p in enumerate(passages):
+                title = p.get("title", "Untitled")
+                abstract = p.get("abstract", "")
+                source = p.get("source_label", f"PMID: {p.get('pmid','?')}")
+                preview = abstract[:400] + ("…" if len(abstract) > 400 else "")
+                st.markdown(f"""
+                <div class="passage">
+                  <div class="passage-title">{i+1}. {title}</div>
+                  <div class="passage-body">{preview}</div>
+                  <div class="passage-meta">{source}</div>
+                </div>
+                """, unsafe_allow_html=True)
 
-        # ── Execution Trace ──
-        st.markdown("---")
-        with st.expander("🔍 Execution Trace (Agent Log)", expanded=False):
-            trace = result.get("trace_log", [])
-            for entry in trace:
-                st.markdown(f'<div class="trace-entry">{entry}</div>', unsafe_allow_html=True)
+    # ── Tab 4: Trace ──────────────────────────────────────────────────────
+    with tab_trace:
+        for entry in trace:
+            st.markdown(f'<div class="trace-line">{entry}</div>', unsafe_allow_html=True)
 
-        # ── Raw State (Debug) ──
-        with st.expander("🛠️ Raw Agent State (Debug)", expanded=False):
-            # Make a copy that's JSON serializable
-            debug_state = {}
-            for k, v in result.items():
-                try:
-                    json.dumps(v)
-                    debug_state[k] = v
-                except (TypeError, ValueError):
-                    debug_state[k] = str(v)
-            st.json(debug_state)
-
-    except Exception as e:
-        progress_container.empty()
-        st.error(f"❌ Agent Error: {str(e)}")
-        with st.expander("Stack Trace"):
-            import traceback
-            st.code(traceback.format_exc())
-
-elif run_clicked and not query:
-    st.warning("Please enter a biomedical question to analyze.")
+elif run and not query:
+    st.warning("Enter a biomedical question first.")
 else:
-    # ── Landing state ──
+    # Landing state
     st.markdown("")
-    col_l1, col_l2, col_l3 = st.columns(3)
-    with col_l1:
-        st.markdown("""
-        <div class="glass-card" style="text-align:center">
-            <div style="font-size:2rem;margin-bottom:0.5rem">📚</div>
-            <div class="card-title" style="justify-content:center">Evidence Retrieval</div>
-            <p style="color:#94a3b8;font-size:0.85rem">
-                Searches PubMed for relevant biomedical literature using
-                BioASQ-style query optimization.
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
-    with col_l2:
-        st.markdown("""
-        <div class="glass-card" style="text-align:center">
-            <div style="font-size:2rem;margin-bottom:0.5rem">🧪</div>
-            <div class="card-title" style="justify-content:center">NLI Verification</div>
-            <p style="color:#94a3b8;font-size:0.85rem">
-                Each claim is verified against source passages using
-                DeBERTa-based Natural Language Inference.
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
-    with col_l3:
-        st.markdown("""
-        <div class="glass-card" style="text-align:center">
-            <div style="font-size:2rem;margin-bottom:0.5rem">🔄</div>
-            <div class="card-title" style="justify-content:center">Self-Correction</div>
-            <p style="color:#94a3b8;font-size:0.85rem">
-                Unsupported claims are automatically removed and the answer
-                is rewritten to maximize faithfulness.
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
-
+    c1, c2, c3 = st.columns(3)
+    for col, icon, title, desc in [
+        (c1, "📚", "BioASQ-style Retrieval", "Searches PubMed for relevant clinical and research literature using query-optimized E-utilities."),
+        (c2, "🧪", "DeBERTa NLI Verification", "Every generated claim is scored for entailment, contradiction, and neutrality against retrieved passages."),
+        (c3, "🔄", "Self-Correction Loop", "Unsupported claims are automatically removed. The agent abstains rather than hallucinate medical facts."),
+    ]:
+        with col:
+            st.markdown(f"""
+            <div class="card" style="text-align:center;padding:1.5rem 1.2rem">
+              <div style="font-size:1.8rem;margin-bottom:0.6rem">{icon}</div>
+              <div style="font-size:0.88rem;font-weight:700;color:#e2e8f0;margin-bottom:0.5rem">{title}</div>
+              <div style="font-size:0.8rem;color:#64748b;line-height:1.6">{desc}</div>
+            </div>
+            """, unsafe_allow_html=True)
     st.markdown("""
-    <div style="text-align:center;color:#64748b;margin-top:2rem;font-size:0.85rem">
-        Enter a biomedical question above and click <b>🔬 Analyze</b> to begin.
+    <div style="text-align:center;color:#475569;font-size:0.8rem;margin-top:1.5rem">
+      Type a biomedical question above and click <b>Analyze →</b>
     </div>
     """, unsafe_allow_html=True)

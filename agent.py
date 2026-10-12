@@ -131,7 +131,16 @@ def extract_claims(state: AgentState) -> dict:
     if state["abstained"]:
         return {}
 
-    claims = llm.extract_claims(state["answer"])
+    answer = state.get("answer", "").strip()
+    if not answer:
+        return {
+            "claims": [],
+            "trace_log": ["⚠️ Answer was empty – no claims to extract"],
+        }
+
+    claims = llm.extract_claims(answer)
+    # Drop any blank claims that could crash the NLI model
+    claims = [c for c in claims if c and c.strip()]
     return {
         "claims": claims,
         "trace_log": [f"🔍 Extracted {len(claims)} atomic claims from the answer"],
