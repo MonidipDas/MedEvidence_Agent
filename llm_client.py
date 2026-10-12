@@ -32,7 +32,7 @@ class SarvamLLMClient:
         self,
         messages: list[dict],
         temperature: float = 0.3,
-        max_tokens: int = 2048,
+        max_tokens: int = 4096,   # sarvam-105b uses tokens on reasoning; needs headroom
     ) -> str:
         """Send a chat-completion request and return the assistant reply."""
         payload = {
@@ -44,10 +44,24 @@ class SarvamLLMClient:
 
         url = f"{self.base_url}/v1/chat/completions"
         try:
-            resp = requests.post(url, headers=self.headers, json=payload, timeout=60)
-            resp.raise_for_status()
+            resp = requests.post(url, headers=self.headers, json=payload, timeout=90)
+            if not resp.ok:
+                error_body = resp.text[:500]
+                logger.error(
+                    "Sarvam API %s error: %s\nURL: %s\nModel: %s\nBody: %s",
+                    resp.status_code, resp.reason, url, self.model, error_body,
+                )
+                raise RuntimeError(
+                    f"Sarvam API {resp.status_code} {resp.reason}: {error_body}"
+                )
             data = resp.json()
-            return data["choices"][0]["message"]["content"]
+            msg = data["choices"][0]["message"]
+            # sarvam-105b may return null content when all tokens go to reasoning;
+            # fall back to reasoning_content in that case
+            content = msg.get("content") or msg.get("reasoning_content") or ""
+            if not content:
+                logger.warning("Sarvam API returned empty content. Full response: %s", data)
+            return content
         except requests.exceptions.HTTPError as e:
             logger.error("Sarvam API HTTP error: %s – %s", e, resp.text)
             raise

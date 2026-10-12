@@ -32,7 +32,7 @@ def _resolve_api_key() -> str:
 # ─── SarvamAI API ───────────────────────────────────────────────────────────
 SARVAM_API_KEY = _resolve_api_key()
 SARVAM_BASE_URL = "https://api.sarvam.ai"
-SARVAM_MODEL = "sarvam-m4"  # SLM model
+SARVAM_MODEL = "sarvam-105b"  # Valid options confirmed by API: sarvam-105b, sarvam-105b-conversations
 
 # ─── NLI Model (DeBERTa) ───────────────────────────────────────────────────
 NLI_MODEL_NAME = "cross-encoder/nli-deberta-v3-base"
