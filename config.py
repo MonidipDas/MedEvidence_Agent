@@ -1,10 +1,36 @@
 """
 Configuration for the Self-Correcting Medical Evidence Agent.
+
+Key resolution order for SARVAM_API_KEY:
+  1. Streamlit secrets  (st.secrets["SARVAM_API_KEY"])  – used when deployed on Streamlit Cloud
+  2. Environment variable (SARVAM_API_KEY)               – used locally or on other cloud hosts
+  3. Hardcoded fallback                                   – development convenience only
 """
 import os
 
+
+def _resolve_api_key() -> str:
+    """Resolve SarvamAI API key from st.secrets, env var, or fallback."""
+    # 1. Try Streamlit secrets (available when deployed on Streamlit Cloud)
+    try:
+        import streamlit as st
+        key = st.secrets.get("SARVAM_API_KEY", "")
+        if key:
+            return key
+    except Exception:
+        pass  # Not in a Streamlit context, or secrets not configured
+
+    # 2. Try environment variable
+    key = os.getenv("SARVAM_API_KEY", "")
+    if key:
+        return key
+
+    # 3. Hardcoded fallback (development only)
+    return "sk_7zzgz0xm_TqTNIr5cqMY0cSA1GupaHbk6"
+
+
 # ─── SarvamAI API ───────────────────────────────────────────────────────────
-SARVAM_API_KEY = os.getenv("SARVAM_API_KEY", "sk_7zzgz0xm_TqTNIr5cqMY0cSA1GupaHbk6")
+SARVAM_API_KEY = _resolve_api_key()
 SARVAM_BASE_URL = "https://api.sarvam.ai"
 SARVAM_MODEL = "sarvam-m4"  # SLM model
 

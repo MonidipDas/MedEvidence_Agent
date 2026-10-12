@@ -1,0 +1,19 @@
+# Secrets – never commit the real file
+.streamlit/secrets.toml
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+venv/
+.env/
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Model cache (large files)
+.cache/
